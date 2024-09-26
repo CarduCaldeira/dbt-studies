@@ -77,6 +77,7 @@ dbt run
 ```
 
 Na pasta models/src são criadas as views SRC_LISTINGS, SRC_REVIEWS e SRC_HOSTS no database no snowflake e nas pastas dim sao aplicados transformações utilizando o jinja para referencia-las. 
+
 -----------------------------------------------------------------------
 ## Incremental
 
@@ -104,7 +105,7 @@ Note que sobre o resultado do select é aplicado uma condição para quais linha
 -----------------------------------------------------------------------
 ## Ephemeral
 
-Tabalas Ephemeral são tabelas que nao são escritas no banco de dados, poupando espaço de armazenamendo, 
+Tabelas Ephemeral são tabelas que nao são escritas no banco de dados, poupando espaço de armazenamendo, 
 por outro lado, nao é aconselhavel utilizalas  em casos de transformações elaboradas visto que será necessário 
 refazer essas transformações.
 
@@ -118,5 +119,125 @@ dbt seed
 Isso ira criar a table a partir dos arquivos na pasta seed.
 
 -> Commmit = "Initial Structure"
+
 -------------------------------------------------------------------------
 ## Source
+
+Source é uma boa prática para referenciar tabelas criadas e gerenciadas fora do escopo do dbt, ao referenciar a source é possível testar e documentar essas tabelas. Para referencia-las é necessário criar um arquivo .yml em models, como no exemplo abaixo:
+```
+version: 2
+
+sources:
+  - name: airbnb
+    schema: raw
+    tables:
+      - name: listings
+        identifier: raw_listings
+
+      - name: hosts
+        identifier: raw_hosts
+
+      - name: reviews
+        identifier: raw_reviews
+        loaded_at_field: date
+        freshness:
+          warn_after: {count: 1, period: hour}
+          error_after: {count: 24, period: hour}
+```
+No exemplo anterior, freshness é referente ao campo date, que caso a data referente seja mais antiga que 1 hora em relação ao momento atual, o dbt emite um aviso, caso seja mais antiga que 24 horas ele emite um erro. Para verificar
+```
+dbt source freshness
+```
+
+Note que anteriormente, referenciamos as tabelas no schema RAW diretamente nos scrits sql, utilizando o alias definido no arquivo sources.yml, como exemplo veja o script (utilizar o ref para referenciar tabelas sources ira gerar um erro, devemos sempre usar o source()):
+```
+WITH raw_hosts AS (
+    SELECT * FROM {{ source('airbnb','hosts') }}
+)
+SELECT
+    id AS host_id,
+    name AS host_name,
+    is_superhost,
+    created_at,
+    updated_at 
+FROM
+    raw_hosts
+```
+
+-------------------------------------------------------------------
+
+## Snapshots
+
+Imagine a situação em para um objeto um dado associado muda ao longo do tempo, como por exemplo o email de login de um usuario em uma plataforma. Por diversos motivos é intererssante ter um registro dessa mudança ao longo do tempo, o que chamamos de snapshot.
+
+O dbt oferece como recurso uma abstração da implementação de um snapshot (o código em si gerado pelo dbt irá depender do conector utilizado). Existem duas formas oferecidas pelo dbt para a implementação do snapshot:
+
+- Timestamp:
+
+- Check
+
+Para exemplificar o primeiro caso crie o script snapshots/scd_raw_hosts.sql
+```
+{% snapshot scd_raw_listings %}
+
+{{
+   config(
+       target_schema='DEV',
+       unique_key='id',
+       strategy='timestamp',
+       updated_at='updated_at',
+       invalidate_hard_deletes=True
+   )
+}}
+
+select * FROM {{ source('airbnb', 'listings') }}
+
+{% endsnapshot %}
+```
+De o comando:
+```
+dbt snapshot
+```
+Note que o dbt criou uma quatro colunas, dbt_scd_id dbt_updated_at, dbt_valid_from, dbt_valid_to.
+
+Atualize uma das linhas no banco de dados:
+
+```
+UPDATE AIRBNB.RAW.RAW_LISTINGS SET MINIMUM_NIGHTS=30,
+    updated_at=CURRENT_TIMESTAMP() WHERE ID=3176;
+
+SELECT * FROM AIRBNB.DEV.SCD_RAW_LISTINGS WHERE ID=3176;
+```
+Note que o select retorna a linha com a coluna dbt_valid_to como null, para que o snapshot atualize é necessário dar o comando dbt snapshot novamente, note agora que a tabela utilizada como snapshot AIRBNB.DEV.SCD_RAW_LISTINGS retorna o duas linhas com a linha atualizada:
+
+![Exemplo de atualização no snapshot](assets/snapshot.png)
+
+Agora a linha com o campo dbt_valid_to null representa o campo mais atual, enquanto para o registro anterior voce tera o registro da data que foi inserido (dbt_valid_from) e data que foi mudado (dbt_valid_to). Os outros dois campos criados pelo dbt são para gerenciamento interno.
+
+Para utilizar essa estrategia de snapshot é importante ter um campo timestamp (que aqui é o updated_at) que será utilizado pelo dbt para registrar os campos dbt_valid_from, dbt_valid_to e uma campo unique (nesse caso o id).
+
+Por padrão o dbt nao atualiza no snapshot linhas deletadas (ficando o ultimo registro como null), para atualizar use 
+invalidate_hard_deletes=True. Apos apagar a linha e der dbt snapshot a tabela de snap shot ficara:
+
+![Snapshot com registro deletado](assets/snapshot_delete.png)
+
+Outra abordagem quando uma tabela não possui uma coluna com data de atualização é utilizar a estrategia check, que verifica mudanças nas colunas selecionadas, 
+como exemplo tome o codigo:
+```
+{% snapshot orders_snapshot_check %}
+
+    {{
+        config(
+          schema='snapshots',
+          strategy='check',
+          unique_key='id',
+          check_cols=['status', 'is_cancelled'],
+        )
+    }}
+
+    select * from {{ source('jaffle_shop', 'orders') }}
+
+{% endsnapshot %}
+```
+
+## Macros
