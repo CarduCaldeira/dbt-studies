@@ -345,3 +345,46 @@ Em schema.yml adicione:
   tests:
    - positive_value
 ```
+
+## Packages
+
+Além de macros o dbt possibilita a utilização de pacotes, para utilização crie um arquivo packages.yml com o conteúdo:
+```
+packages:
+  - package: dbt-labs/dbt_utils
+    version: 0.8.0
+``` 
+Para instalar a dependência:
+```
+dbt deps
+```
+
+O pacote dbt_utils nos possibilita o uso do recurso surrogate_key, que cria chave primária, no exemplo fct/fct_reviews.sql:
+```
+{{
+  config(
+    materialized = 'incremental',
+    on_schema_change='fail'
+    )
+}}
+WITH src_reviews AS (
+  SELECT * FROM {{ ref('src_reviews') }}
+)
+SELECT 
+  {{ dbt_utils.surrogate_key(['listing_id', 'review_date', 'reviewer_name', 'review_text']) }}
+    AS review_id,
+  * 
+  FROM src_reviews
+WHERE review_text is not null
+{% if is_incremental() %}
+  AND review_date > (select max(review_date) from {{ this }})
+{% endif %}
+```
+
+Nesse caso, como a tabela fct_reviews tem a condição on_schema_change='fail', 
+é necessário realizar uma atualização da tabela para não gerar nenhum tipo de erro:
+```
+dbt run --full-refresh --select fct_reviews
+```
+
+## Documentação
