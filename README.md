@@ -254,7 +254,7 @@ Também você pode construir os seus próprios testes genéricos.
 
 ### Tests genéricos
 
-Para criar um teste genérico crie um arquivo models/schema.yml:
+Para criar um teste genérico crie um arquivo models/schema.yml, com o nome da tabela a ser testada e suas colunas com os rescpectivos testes:
 
 ```
 version: 2
@@ -310,3 +310,38 @@ LIMIT 10
 ```
 
 ## Macros
+
+Macros são templates Jinja de queries SQL que podem ser usados ao longo do projeto pelo DBT, um exemplo é a utilização de macros para testes singulares e genéricos.
+Um exemplo de uma macro para ser utilizada em um testes singular, em macros/no_nulls_in_columns.sql escreva:
+
+```
+{% macro no_nulls_in_columns(model) %}
+    SELECT * FROM {{ model }} WHERE
+    {% for col in adapter.get_columns_in_relation(model) -%}
+        {{ col.column }} IS NULL OR
+    {% endfor %}
+    FALSE
+{% endmacro %}
+```
+
+Em tests/no_nulls_in_dim_listings.sql, use a macro:
+```
+{{ no_nulls_in_columns(ref('dim_listings_cleansed')) }}
+```
+Para a utilização em testes genéricos tome os eguinte exemplo, crie o arquivo macros/positive_value.sql:
+```
+{% test positive_value(model, column_name) %}
+SELECT
+    *
+FROM
+    {{ model }}
+WHERE
+    {{ column_name}} < 1
+{% endtest %}
+```
+Em schema.yml adicione:
+```
+- name: minimum_nights
+  tests:
+   - positive_value
+```
