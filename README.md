@@ -240,4 +240,73 @@ como exemplo tome o codigo:
 {% endsnapshot %}
 ```
 
+## Tests
+
+Há dois tipos de testes, testes singulares e testes genéricos. Testes singulares são queries SQL que esperam retornar resultados vazios. 
+
+O dbt possui 4 testes built-in:
+- unique
+- not_null
+- accepted_values
+- Relationships
+
+Também você pode construir os seus próprios testes genéricos.
+
+### Tests genéricos
+
+Para criar um teste genérico crie um arquivo models/schema.yml:
+
+```
+version: 2
+
+models:
+  - name: dim_listings_cleansed
+    columns:
+
+     - name: listing_id
+       tests:
+         - unique
+         - not_null
+
+     - name: host_id
+       tests:
+         - not_null
+         - relationships:
+             to: ref('dim_hosts_cleansed')
+             field: host_id
+
+     - name: room_type
+       tests:
+         - accepted_values:
+             values: ['Entire home/apt',
+                      'Private room',
+                      'Shared room',
+                      'Hotel room']
+```
+Data Warehouse com o postgres já possuem como recurso condições de unicidade e não nulos, porém nem todos Data Warehouses possuem este recurso, dessa forma o dbt implementa sua verificação.
+
+Note que estamos  usando os testes built-in no schema.yml, porém podemos construir os nossos própios testes com a conceito de macros, que veremos posteriormente.
+
+Para rodar o teste:
+```
+dbt test
+```
+Para rodar testes especificos a uma tabela:
+```
+dbt test --select <nome-da-tabela>
+```
+
+### Singular Tests
+
+Para criar um teste singular basta criar um script SQL em tests/, veja o exemplo em dim_listings_minumum_nights.sql. Caso o retorno da query seja não vazio teremos um erro.
+
+```
+SELECT
+    *
+FROM
+    {{ ref('dim_listings_cleansed') }}
+WHERE minimum_nights < 1
+LIMIT 10
+```
+
 ## Macros
