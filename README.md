@@ -101,6 +101,8 @@ WHERE review_text is not null
 {% endif %}
 ```
 Note que sobre o resultado do select é aplicado uma condição para quais linhas serão adiconadas/atualizadas.
+Para visualizar estrategias para a materialização incremental verique a documentação em
+https://docs.getdbt.com/docs/build/incremental-strategy.
 
 -----------------------------------------------------------------------
 ## Ephemeral
@@ -388,3 +390,196 @@ dbt run --full-refresh --select fct_reviews
 ```
 
 ## Documentação
+
+O dbt possibilita a criação de documentação automática, como primeiro exemplo em schema.yml insira o campo description para a tabela dim_listings_cleansed:
+```
+version: 2
+
+models:
+  - name: dim_listings_cleansed
+    description: Cleansed table which contains Airbnb listings.
+    columns:
+      
+      - name: listing_id
+        description: Primary key for the listing
+        tests:
+          - unique
+          - not_null
+        
+      - name: host_id
+        description: The hosts's id. References the host table.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_hosts_cleansed')
+              field: host_id
+
+      - name: room_type
+        description: Type of the apartment / room
+        tests:
+          - accepted_values:
+              values: ['Entire home/apt', 'Private room', 'Shared room', 'Hotel room']
+
+      - name: minimum_nights
+        description: '{{ doc("dim_listing_cleansed__minimum_nights") }}'
+        tests:
+          - positive_value
+
+  - name: dim_hosts_cleansed
+    columns:
+      - name: host_id
+        tests:
+          - not_null
+          - unique
+      
+      - name: host_name
+        tests:
+          - not_null
+      
+      - name: is_superhost
+        tests:
+          - accepted_values:
+              values: ['t', 'f']
+  
+  - name: fct_reviews
+    columns:
+      - name: listing_id
+        tests:
+          - relationships:
+              to: ref('dim_listings_cleansed')
+              field: listing_id
+
+      - name: reviewer_name
+        tests:
+          - not_null
+      
+      - name: review_sentiment
+        tests:
+          - accepted_values:
+              values: ['positive', 'neutral', 'negative']
+```
+Note que a coluna minimum_nights faz referencia a uma doc, adicione em models/docs.md
+```
+{% docs dim_listing_cleansed__minimum_nights %}
+Minimum number of nights required to rent this property. 
+
+Keep in mind that old listings might have `minimum_nights` set 
+to 0 in the source tables. Our cleansing algorithm updates this to `1`.
+
+{% enddocs %}
+```
+Para gerar o site estático de comando:
+```
+dbt docs generate
+```
+E para subir a página:
+```
+dbt docs serve
+```
+Além disso, podemos fazer a nossas próprias páginas como a página inicial em overview.md:
+```
+{% docs __overview__ %}
+# Airbnb pipeline
+
+Hey, welcome to our Airbnb pipeline documentation!
+
+Here is the schema of our input data:
+![input schema](https://dbtlearn.s3.us-east-2.amazonaws.com/input_schema.png)
+
+{% enddocs %}
+```
+Além disso, você pode configurar uma pasta de assets em dbt_project.yml utilizada pelo dbt:
+
+![alt text](assets_readme/image.png)
+
+Referenciando as imagens em assets: 
+```
+{% docs __overview__ %}
+# Airbnb pipeline
+
+Hey, welcome to our Airbnb pipeline documentation!
+
+Here is the schema of our input data:
+![input schema](assets/input_schema.png)
+
+{% enddocs %}
+```
+
+## Analyses
+
+Há casos em que você ainda gostaria de gerar a query utilizando macros, models etc porém não gostaria que isso se materializase.
+Para isso o dbt disponibiliza a pasta analyses. Nela, as queries escritas no formato Jinja serão compiladas. No exemplo abaixo 
+crie um aarquivo em analyses/full_moon_no_sleep.sql com o seguinte conteudo:
+
+```
+WITH fullmoon_reviews AS (
+    SELECT * FROM AIRBNB.DEV.mart_full_moon_reviews
+)
+SELECT
+    is_full_moon,
+    review_sentiment,
+    COUNT(*) as reviews
+FROM
+    fullmoon_reviews
+GROUP BY
+    is_full_moon,
+    review_sentiment
+ORDER BY
+    is_full_moon,
+    review_sentiment
+```
+Execute:
+```
+dbt compile
+```
+Em target/compiled/dbtlearn/analyses/full_moon_no_sleep.sql (arquivo não commitado) é
+possível ver o query SQL pura gerada.
+
+
+## Hooks
+
+O dbt nós possibilita a execução de triggers (chamados hooks). Para apresentar essa aplicação
+suponha que voce queira criar dashboards no superset, preset etc. Para dar acesso as tabelas
+ao usario chamado REPORTER insira em dbt-project.yml:
+```
++post-hook:
+ - "GRANT SELECT ON {{ this }} TO ROLE REPORTER"
+```
+
+Existem 4 tipos de hooks:
+- pre-hook: Executado antes de um modelo, seed ou snapshot ser construido.
+- post-hook: Executado depois de um modelo, seed ou snapshot ser construido.
+- on-run-start: Execuatado ao iniciar 
+  dbt build, dbt compile, dbt docs generate, dbt run, dbt seed, dbt snapshot, or dbt test.
+- on-run-end: Executado ao finalizar
+  dbt build, dbt compile, dbt docs generate, dbt run, dbt seed, dbt snapshot, or dbt test.
+
+## Exposures
+
+Um recurso que o dbt disponibiliza é o conceito de exposures.
+Por meio de um de um arquivo .yml. Como no exemplo em 
+https://github.com/nordquant/complete-dbt-bootcamp-zero-to-hero/blob/main/dbtlearn/models/dashboards.yml.
+
+O interessante é que ao dar o comando 
+```
+dbt docs generate
+```
+Este arquivo .yml será agregado na documentação do projeto, inclusive referenciando
+o dashboard gerado no lineage graph, mostrando sua origem.
+
+Neste projeto não foi utilizado exposures.
+
+## Great Expectations
+
+Uns dos pacotes mais utilizados no dbt é o dbt-expectations,
+que utiliza o great expectations para realizar testes. A grande vantagem
+sobre os testes singulares (Singular Test) é que eles já estão implementados.
+
+Para sua utilização insira em packages.yml as configurações para sua instalação,
+como feito para dbt_utils (para verificar detalhes consulte a documentação em 
+https://hub.getdbt.com/calogica/dbt_expectations/latest/). 
+
+Após a instalação (rode dbt deps) em schema.yml voce pode adicionar os
+testes com dbt-expectations. Exemplos de uso podem ser verificados na documentação e em
+https://github.com/nordquant/complete-dbt-bootcamp-zero-to-hero/blob/main/dbtlearn/models/schema.yml.
+
