@@ -212,7 +212,7 @@ SELECT * FROM AIRBNB.DEV.SCD_RAW_LISTINGS WHERE ID=3176;
 ```
 Note que o select retorna a linha com a coluna dbt_valid_to como null, para que o snapshot atualize é necessário dar o comando dbt snapshot novamente, note agora que a tabela utilizada como snapshot AIRBNB.DEV.SCD_RAW_LISTINGS retorna o duas linhas com a linha atualizada:
 
-![Exemplo de atualização no snapshot](assets/snapshot.png)
+![Exemplo de atualização no snapshot](assets_readme/snapshot.png)
 
 Agora a linha com o campo dbt_valid_to null representa o campo mais atual, enquanto para o registro anterior voce tera o registro da data que foi inserido (dbt_valid_from) e data que foi mudado (dbt_valid_to). Os outros dois campos criados pelo dbt são para gerenciamento interno.
 
@@ -221,7 +221,7 @@ Para utilizar essa estrategia de snapshot é importante ter um campo timestamp (
 Por padrão o dbt nao atualiza no snapshot linhas deletadas (ficando o ultimo registro como null), para atualizar use 
 invalidate_hard_deletes=True. Apos apagar a linha e der dbt snapshot a tabela de snap shot ficara:
 
-![Snapshot com registro deletado](assets/snapshot_delete.png)
+![Snapshot com registro deletado](assets_readme/snapshot_delete.png)
 
 Outra abordagem quando uma tabela não possui uma coluna com data de atualização é utilizar a estrategia check, que verifica mudanças nas colunas selecionadas, 
 como exemplo tome o codigo:
